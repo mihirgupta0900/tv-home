@@ -17,7 +17,7 @@
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LEANBACK_LAUNCHER" />
         </intent>
-        <package android:name="com.tcl.tv" />
+        <package android:name="com.mediatek.wwtv.tvcenter" />
         <package android:name="com.tcl.suspension" />
     </queries>
 

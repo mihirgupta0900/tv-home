@@ -630,6 +630,9 @@ public class MainActivity extends Activity {
                 if (s != null && !s.contains("unknown ssid")) name = s.replace("\"", "");
                 if (wm.getConnectionInfo().getNetworkId() == -1) name = "Offline";
             }
+            android.net.ConnectivityManager cm = (android.net.ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+            android.net.NetworkInfo ni = cm == null ? null : cm.getActiveNetworkInfo();
+            if (ni != null && ni.isConnected() && ni.getType() == android.net.ConnectivityManager.TYPE_ETHERNET) name = "Ethernet";
         } catch (SecurityException ignored) { }
         wifiPill.setText("◉  " + name);
     }
