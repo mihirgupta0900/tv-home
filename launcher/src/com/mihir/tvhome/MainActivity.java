@@ -90,6 +90,8 @@ public class MainActivity extends Activity {
     private String[] wallpapers = new String[0];
     private int wallIndex = -1;
     private long wallChangedAt;
+    private int wallGen;           // bumped on stop so a decode that finishes late is dropped
+    private boolean wallReleased;  // photos were freed on stop; reload the same one on resume
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable rotateWallpaper = this::nextWallpaper;
     static final long WALLPAPER_INTERVAL_MS = 10 * 60 * 1000;
@@ -150,7 +152,11 @@ public class MainActivity extends Activity {
         if (getPackageManager().getChangedPackages(packageSeq) != null) buildApps();
         if (firstShow) { firstShow = false; playEntrance(); }
         // New photo on return if the current one has been up for the full interval.
-        if (wallIndex < 0 || SystemClock.elapsedRealtime() - wallChangedAt >= WALLPAPER_INTERVAL_MS) nextWallpaper();
+        if (wallReleased && wallIndex >= 0 && SystemClock.elapsedRealtime() - wallChangedAt < WALLPAPER_INTERVAL_MS) {
+            wallReleased = false;
+            loadWallpaper(wallIndex);
+            scheduleWallpaper(WALLPAPER_INTERVAL_MS - (SystemClock.elapsedRealtime() - wallChangedAt));
+        } else if (wallIndex < 0 || SystemClock.elapsedRealtime() - wallChangedAt >= WALLPAPER_INTERVAL_MS) { wallReleased = false; nextWallpaper(); }
         else scheduleWallpaper(WALLPAPER_INTERVAL_MS - (SystemClock.elapsedRealtime() - wallChangedAt));
     }
 
@@ -160,6 +166,27 @@ public class MainActivity extends Activity {
         handler.removeCallbacks(rotateWallpaper);
         unregisterReceiver(tick);
         if (inputsPopup != null) inputsPopup.dismiss();
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        releaseWallpapers();
+    }
+
+    @Override
+    public void onTrimMemory(int level) {
+        super.onTrimMemory(level);
+        if (level >= TRIM_MEMORY_UI_HIDDEN) releaseWallpapers();
+    }
+
+    /** Free both full-screen photos while another app is in front; onResume reloads the current one. */
+    private void releaseWallpapers() {
+        wallGen++;
+        handler.removeCallbacks(rotateWallpaper);
+        if (wallFront != null) { wallFront.animate().cancel(); wallFront.setImageDrawable(null); }
+        if (wallBack != null) { wallBack.animate().cancel(); wallBack.setImageDrawable(null); }
+        wallReleased = true;
     }
 
     @Override
@@ -679,7 +706,13 @@ public class MainActivity extends Activity {
         wallIndex = (wallIndex + 1) % wallpapers.length;
         getPreferences(MODE_PRIVATE).edit().putInt("wallpaper", wallIndex).apply();
         wallChangedAt = SystemClock.elapsedRealtime();
-        String name = "wallpapers/" + wallpapers[wallIndex];
+        loadWallpaper(wallIndex);
+        scheduleWallpaper(WALLPAPER_INTERVAL_MS);
+    }
+
+    private void loadWallpaper(int index) {
+        final String name = "wallpapers/" + wallpapers[index];
+        final int gen = wallGen;
         new Thread(() -> {
             Bitmap bm = null;
             try (java.io.InputStream in = getAssets().open(name)) {
@@ -688,9 +721,8 @@ public class MainActivity extends Activity {
                 bm = BitmapFactory.decodeStream(in, null, o);
             } catch (java.io.IOException ignored) { }
             Bitmap result = bm;
-            runOnUiThread(() -> showWallpaper(result));
+            runOnUiThread(() -> { if (gen == wallGen) showWallpaper(result); });
         }).start();
-        scheduleWallpaper(WALLPAPER_INTERVAL_MS);
     }
 
     private void showWallpaper(Bitmap bm) {
