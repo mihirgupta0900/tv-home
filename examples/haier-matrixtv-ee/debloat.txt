@@ -1,0 +1,36 @@
+# Haier Matrix TV EE (device omonia), Google TV on Android 14, build UKN6.260116.044
+# Apply: tools/disable.sh examples/haier-matrixtv-ee/debloat.txt   Undo: tools/restore.sh <same file>
+# Everything is DISABLED for user 0, never uninstalled.
+# Comment out any line for an app you use. Answers here: no casting, no voice, no USB media,
+# no Bluetooth speaker mode; keeps YouTube Music.
+# Keep com.cltv.hybrid ("LiveTV"): on this set it's the Live TV / HDMI input player.
+
+# Ads and tracking
+tv.anoki.acr.anokiacroptin           # Anoki ACR: recognises what's on screen for ad targeting
+com.haier.oemtabprovider             # the "Haier" content tab in the stock launcher
+com.google.android.apps.tv.dreamx    # ambient screensaver with recommendations (falls back to basic)
+com.google.android.feedback
+com.android.tv.feedbackconsent
+
+# Haier clutter
+com.haier.tvhousekeeper              # "TV Assistant" cleaner
+com.haier.emanual9603                # E-Manual
+com.haier.apps                       # Haier app picks
+com.haier.bt_pair_tips               # Bluetooth pairing tips popup
+com.mediatek.tv.retaildemo           # shop demo mode
+tv.mopa.ginga                        # Ginga interactive-TV middleware (Brazil only)
+
+# Google extras
+com.google.android.play.games
+
+# Features this household doesn't use
+com.google.android.apps.mediashell   # Chromecast built-in
+com.mediatek.miracast                # HaiCast screen mirroring
+com.mediatek.dialservice             # DIAL "send to TV"
+com.google.android.katniss           # Google Assistant / voice search (mic button stops working)
+com.mediatek.wwtv.mediaplayer        # USB media player
+com.haier.overseastv.bluetoothspeaker  # use the TV as a Bluetooth speaker
+com.haier.gamingbar                  # in-game overlay (FPS, game mode)
+it.hon.service                       # hOn smart-home appliance service
+com.haierubic.usmartdevice           # Haier smart device control
+com.haier.tv.hmagicboard             # HMagicBoard whiteboard / screen share

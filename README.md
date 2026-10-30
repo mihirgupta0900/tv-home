@@ -85,12 +85,17 @@ Change the dock: edit `config.xml`, then run `launcher/build-and-install.sh`.
   while another app was in front. The launcher re-checks with `getChangedPackages` on every return.
 - **Unsplash blocks scripted downloads** with a bot check. The wallpapers come from Wikimedia
   Commons Featured Pictures instead.
+- **Some Android 14 Google TVs only offer Wireless debugging** (e.g. Haier Matrix TV): port 5555
+  stays closed and `adb-shell` can't do the TLS pairing. Pair once with Google's `adb`
+  (`adb pair <ip>:<pairing port> <code>`, `adb connect <ip>:<port>`), then `adb tcpip 5555` so
+  `tools/tv.py` works. Port 5555 closes again when the TV reboots.
 
 ## Supported TVs
 
 Android TV and Google TV: TCL, Xiaomi/Redmi, Hisense, Sony, OnePlus, Realme, Nvidia Shield,
 Chromecast with Google TV and most others. Not Samsung (Tizen), LG (webOS) or Fire TV.
-Tested on: TCL Google TV (Android 11). Add yours to `examples/`.
+Tested on: TCL Google TV (Android 11), Haier Matrix TV EE (Google TV, Android 14). Add yours to
+`examples/`.
 
 ## Credits
 

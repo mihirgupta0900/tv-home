@@ -19,11 +19,15 @@
         <item>com.tcl.suspension</item>
         <item>com.tcl.t_solo</item>
         <item>com.tcl.dashboard</item>
+        <item>com.cltv.hybrid</item>
+        <item>com.telink.lt</item>
+        <item>com.haier.launcher.haiermatrix</item>
     </string-array>
 
     <!-- The TV's Live TV / tuner app, listed last in the Inputs menu. Empty to leave it out.
          Common ones: com.tcl.tv (TCL), com.mediatek.wwtv.tvcenter (Xiaomi, many MediaTek sets),
-         com.google.android.tv (Google Live Channels), com.sony.dtv.tvx (Sony). -->
+         com.google.android.tv (Google Live Channels), com.sony.dtv.tvx (Sony),
+         com.cltv.hybrid (Haier Google TV; also set it as input_picker_package). -->
     <string name="live_tv_package" translatable="false">com.tcl.tv</string>
 
     <!-- The manufacturer's own source picker, used if switching to an input directly fails. -->
