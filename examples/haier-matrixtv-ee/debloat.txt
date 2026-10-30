@@ -30,3 +30,6 @@ com.mediatek.dialservice             # DIAL "send to TV"
 com.google.android.katniss           # Google Assistant / voice search (mic button stops working)
 com.mediatek.wwtv.mediaplayer        # USB media player
 com.haier.overseastv.bluetoothspeaker  # use the TV as a Bluetooth speaker
+com.haier.gamingbar                  # in-game overlay (FPS, game mode)
+it.hon.service                       # hOn smart-home appliance service
+com.haierubic.usmartdevice           # Haier smart device control
