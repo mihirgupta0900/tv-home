@@ -62,10 +62,15 @@ Android's stack reconnects bonded devices by profile priority. Plan: use the hid
 
 ### 3. Sharing
 - **Many paired devices:** supported by the design above.
-- **Audio to two devices at once:** not supported by Android 9. Options to research, none promised:
-  - Headphones with Bluetooth multipoint, paired to TV and phone, so each stays connected without a fight (helps goal 1).
-  - Output from the TV's audio jack/optical to a hardware splitter or Auracast/dual-transmitter.
-  - A TV or firmware upgrade to Android 13+ with LE Audio broadcast.
+- **Audio to two devices at once: not possible on this TV (Phase 3 verdict).** Findings from the Hisense (2026-10-31):
+  - The Bluetooth stack allows up to 5 connected audio devices (`MaxConnectedAudioDevices: 5`), but Android's audio policy sends `STREAM_MUSIC` to a single `bt_a2dp` output, so only one device plays at a time.
+  - There is no LE Audio or Auracast on Android 9, and no dual-audio option in the firmware.
+  - This comes from the TV's configuration, not a test with two headphones; I only had one audio device to hand.
+  - What does work: many devices stay paired and you switch between them from the Bluetooth screen.
+  - Ways to get two listeners, none of which need code here:
+    - A Bluetooth transmitter with dual-headphone output, fed from the TV's optical or 3.5 mm audio out.
+    - Headphones with multipoint (paired to the TV and a phone). This doesn't give two listeners, but it helps goal 1.
+    - A newer TV with LE Audio broadcast (Auracast), Android 13 or later.
 
 ## Phases
 
@@ -84,6 +89,12 @@ Known gap: no background service, so a device opened to `100` from the TV's own 
 
 Local build tools live in `tools/sdk` (git-ignored). Build with:
 `JAVA_HOME=tools/sdk/jdk/Contents/Home ANDROID_HOME=tools/sdk/android MIN_SDK=28 STOCK_LAUNCHER=com.google.android.tvlauncher launcher/build-and-install.sh`
+
+## Status
+
+All four phases are done. Phase 0 (spike), 1 (never-steal), 2 (pill and manager screen; connect and disconnect confirmed working on the TV) and 3 (sharing verdict above).
+
+Not yet tested: a full power cut, forgetting a device, and pairing a new one.
 
 ## Open questions
 
