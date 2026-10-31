@@ -1,0 +1,30 @@
+# Hisense HiSmart 4K A4FFM (laohushan, Android 9 / SDK 28, MediaTek MT5886-class), build PTMR.190127.037
+# Apply: tools/disable.sh examples/hisense-a4ffm/debloat.txt
+# Undo:  STOCK_LAUNCHER=com.google.android.tvlauncher/.MainActivity tools/restore.sh examples/hisense-a4ffm/debloat.txt
+# Everything is DISABLED for user 0, never uninstalled. Kept on purpose: cast (mediashell, DLNA, RemoteNow),
+# OTA/remote upgrade, Live TV and tuner, HDMI input, Netflix observer. Verified: the list survives a reboot.
+# Not touched because their role was unclear: Smartsense*, TvProtector's service, HisenseB2B, Kpad, FavKey, Account.
+
+# batch 1: telemetry (ACR, logs), demo/store mode, Alexa, unused preloaded apps
+com.hisense.evservice
+com.hisense.app.logreport
+com.google.android.tv.bugreportsender
+com.google.android.feedback
+fusion.android.tv.demo
+com.hisense.storemode
+com.hisense.alexa
+com.google.android.videos
+com.pelmorex.WeatherEyeAndroid.tv
+com.bamnetworks.mobile.android.gameday.atbat
+com.google.android.play.games
+
+# batch 2: push messages, recommendation rows and screensaver (stock launcher is gone), sync adapters
+com.hisense.service.message
+com.google.android.tvrecommendations
+com.google.android.leanbacklauncher.recommendations
+com.google.android.backdrop
+com.google.android.syncadapters.calendar
+com.google.android.syncadapters.contacts
+
+# batch 3: Google Assistant (voice assistant not used; the mic button does nothing)
+com.google.android.katniss
