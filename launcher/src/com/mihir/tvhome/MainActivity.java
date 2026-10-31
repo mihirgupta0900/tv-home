@@ -353,11 +353,13 @@ public class MainActivity extends Activity {
         right.setClipChildren(false);
         TextView inputs = pill("Inputs", "⇥");
         inputs.setOnClickListener(v -> showInputs(v));
+        TextView bluetooth = pill("Bluetooth", "ᛒ");
+        bluetooth.setOnClickListener(v -> startActivity(new Intent(this, BluetoothActivity.class)));
         wifiPill = pill("Wi-Fi", "◉");
         wifiPill.setOnClickListener(v -> launch(new Intent(Settings.ACTION_WIFI_SETTINGS)));
         TextView settings = pill("Settings", "⚙");
         settings.setOnClickListener(v -> launch(new Intent(Settings.ACTION_SETTINGS)));
-        for (TextView p : new TextView[]{inputs, wifiPill, settings}) {
+        for (TextView p : new TextView[]{inputs, bluetooth, wifiPill, settings}) {
             right.addView(p, llp(-2, dp(30), dp(10), 0, 0, 0));
             pills.add(p);
         }

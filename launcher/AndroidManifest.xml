@@ -51,6 +51,14 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".BluetoothActivity"
+            android:exported="false"
+            android:label="Bluetooth"
+            android:excludeFromRecents="true"
+            android:screenOrientation="landscape"
+            android:theme="@style/Home" />
+
         <receiver android:name=".BootReceiver" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
