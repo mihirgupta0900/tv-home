@@ -39,6 +39,7 @@ printf '%s\n' \
   "pm install -r /data/local/tmp/tvhome.apk" \
   "rm -f /data/local/tmp/tvhome.apk" \
   "pm grant com.mihir.tvhome android.permission.ACCESS_FINE_LOCATION" \
+  "pm grant com.mihir.tvhome android.permission.WRITE_SECURE_SETTINGS" \
   "cmd package set-home-activity --user 0 com.mihir.tvhome/.MainActivity" \
   "pm disable-user --user 0 $STOCK_LAUNCHER" \
   "${SETUPWRAITH_CMD:-true}" \

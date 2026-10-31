@@ -3,6 +3,7 @@ package com.mihir.tvhome;
 import android.animation.ArgbEvaluator;
 import android.animation.ValueAnimator;
 import android.app.Activity;
+import android.bluetooth.BluetoothDevice;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
@@ -153,6 +154,11 @@ public class MainActivity extends Activity {
         tf.addAction(Intent.ACTION_TIMEZONE_CHANGED);
         tf.addAction(WifiManager.NETWORK_STATE_CHANGED_ACTION);
         registerReceiver(tick, tf);
+        // Re-lock paired audio devices whenever one disconnects or a new one pairs.
+        IntentFilter bf = new IntentFilter(BluetoothDevice.ACTION_ACL_DISCONNECTED);
+        bf.addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED);
+        registerReceiver(btLock, bf);
+        BtPolicy.lockDown(this);
         updateClock();
         updateWifi();
         View last = lastFocusedId == View.NO_ID ? null : findViewById(lastFocusedId);
@@ -175,8 +181,13 @@ public class MainActivity extends Activity {
         super.onPause();
         handler.removeCallbacks(rotateWallpaper);
         unregisterReceiver(tick);
+        unregisterReceiver(btLock);
         if (inputsPopup != null) inputsPopup.dismiss();
     }
+
+    private final BroadcastReceiver btLock = new BroadcastReceiver() {
+        @Override public void onReceive(Context c, Intent i) { BtPolicy.lockDown(c); }
+    };
 
     @Override
     protected void onStop() {
