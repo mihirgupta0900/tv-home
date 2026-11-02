@@ -1,0 +1,48 @@
+# Xiaomi Mi TV (MiTV-MOOR6, device venom), Android 11, build RTM5.220609.003.1593
+# Apply: tools/disable.sh examples/xiaomi-mitv-moor6/debloat.txt   Undo: tools/restore.sh <same file>
+# Everything is DISABLED for user 0, never uninstalled.
+# Comment out any line for an app you use. Answers here: no Chromecast, no mirroring, no USB media,
+# no Xiaomi TV+ or PatchWall. Voice search and the ambient screensaver stay.
+# Leave com.mitv.livetv enabled: it handles the TV's inputs.
+# Leave com.xiaomi.android.tvsetup.partnercustomizer enabled: its GlobalKeyReceiver handles the
+# remote's Input and Settings buttons and most shortcut keys.
+# The remote's YouTube button sends KEYCODE_BUTTON_3 to the stock launcher, so it stops working once
+# launcher/build-and-install.sh disables that launcher.
+
+# Xiaomi telemetry
+com.miui.tv.analytics              # analytics service
+com.xiaomi.statistic
+com.xiaomi.tvqs.overseas           # no UI; receivers upload logs and DropBox crash entries
+
+# Xiaomi ads, promo rows and auto-installs
+com.mitv.tvhome.michannel          # promo channels on the stock launcher
+com.mitv.tvhome.oemtab             # Xiaomi tab on the stock launcher
+com.mediatek.android.leanbacklauncher.partnercustomizer
+android.autoinstalls.config.xiaomi.amelie   # silently installs promoted apps
+
+# Xiaomi content apps
+com.mitv.tvhome.atv                # PatchWall
+com.mitv.tvhome.mitvplus           # Xiaomi TV+ free channels
+
+# Xiaomi background clutter
+com.xiaomi.mitv.tvmanager          # cleaner / "TV Manager"
+
+# Screen mirroring
+com.xiaomi.mitv.smartshare         # Smart Share / Miracast
+com.xiaomi.wfdsinkhelperservice
+
+# USB media
+com.mitv.gallery
+com.xiaomi.mitv.mediaexplorer
+com.mitv.videoplayer
+com.xiaomi.mimusic2
+
+# Google extras
+com.google.android.apps.mediashell # Chromecast built-in
+com.google.android.videos          # Google TV / Play Movies
+com.google.android.play.games
+com.google.android.feedback
+com.google.android.youtube.tvmusic
+
+# Extra HOME activity: with the stock launcher disabled it competes with ours for the Home button
+com.duokan.factorytest
