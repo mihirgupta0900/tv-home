@@ -71,9 +71,12 @@ public class MainActivity extends Activity {
         String pkg, label;
         ComponentName component;
         Drawable art;
-        boolean isBanner;
+        boolean isBanner, removable;
         int color;
     }
+
+    /** App to focus after the next buildApps(), so a pinned or moved tile keeps focus. */
+    private String focusPkg;
 
     private final Map<String, Integer> colorCache = new HashMap<>();
     private final List<View> dockCards = new ArrayList<>();
@@ -113,7 +116,10 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
-        dockApps = getResources().getStringArray(R.array.dock_apps);
+        // The dock edited from the long-press menu wins over config.xml.
+        String saved = getPreferences(MODE_PRIVATE).getString("dock", null);
+        dockApps = saved != null ? (saved.isEmpty() ? new String[0] : saved.split(","))
+                : getResources().getStringArray(R.array.dock_apps);
         hidden.addAll(Arrays.asList(getResources().getStringArray(R.array.hidden_apps)));
         hidden.add(getPackageName());
         liveTvPkg = getString(R.string.live_tv_package);
@@ -147,7 +153,8 @@ public class MainActivity extends Activity {
         if (last == null && !dockCards.isEmpty()) last = dockCards.get(0);
         if (last != null) last.requestFocus();
         // Catch installs/removals that happened while another app was in front.
-        if (getPackageManager().getChangedPackages(packageSeq) != null) buildApps();
+        // getChangedPackages is API 26+; on older TVs the package receiver alone keeps the list fresh.
+        if (android.os.Build.VERSION.SDK_INT >= 26 && getPackageManager().getChangedPackages(packageSeq) != null) buildApps();
         if (firstShow) { firstShow = false; playEntrance(); }
         // New photo on return if the current one has been up for the full interval.
         if (wallIndex < 0 || SystemClock.elapsedRealtime() - wallChangedAt >= WALLPAPER_INTERVAL_MS) nextWallpaper();
@@ -306,7 +313,7 @@ public class MainActivity extends Activity {
         wifiPill = pill("Wi-Fi", "◉");
         wifiPill.setOnClickListener(v -> launch(new Intent(Settings.ACTION_WIFI_SETTINGS)));
         TextView settings = pill("Settings", "⚙");
-        settings.setOnClickListener(v -> launch(new Intent(Settings.ACTION_SETTINGS)));
+        settings.setOnClickListener(v -> openSettings());
         for (TextView p : new TextView[]{inputs, wifiPill, settings}) {
             right.addView(p, llp(-2, dp(30), dp(10), 0, 0, 0));
             pills.add(p);
@@ -341,11 +348,17 @@ public class MainActivity extends Activity {
 
     private void buildApps() {
         PackageManager pm = getPackageManager();
-        android.content.pm.ChangedPackages changed = pm.getChangedPackages(packageSeq);
-        if (changed != null) packageSeq = changed.getSequenceNumber();
-        Intent q = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
+        if (android.os.Build.VERSION.SDK_INT >= 26) {
+            android.content.pm.ChangedPackages changed = pm.getChangedPackages(packageSeq);
+            if (changed != null) packageSeq = changed.getSequenceNumber();
+        }
+        // TV apps first; phone-style apps (LAUNCHER only, e.g. salom.tv mobile) fill in after them.
+        List<ResolveInfo> found = new ArrayList<>(pm.queryIntentActivities(
+                new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER), 0));
+        found.addAll(pm.queryIntentActivities(
+                new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0));
         Map<String, App> byPkg = new HashMap<>();
-        for (ResolveInfo ri : pm.queryIntentActivities(q, 0)) {
+        for (ResolveInfo ri : found) {
             ActivityInfo ai = ri.activityInfo;
             if (hidden.contains(ai.packageName) || byPkg.containsKey(ai.packageName)) continue;
             App a = new App();
@@ -357,6 +370,7 @@ public class MainActivity extends Activity {
             a.isBanner = banner != null;
             a.art = banner != null ? banner : ri.loadIcon(pm);
             a.color = sampleColor(a.pkg, a.art);
+            a.removable = (ai.applicationInfo.flags & android.content.pm.ApplicationInfo.FLAG_SYSTEM) == 0;
             byPkg.put(a.pkg, a);
         }
 
@@ -400,9 +414,19 @@ public class MainActivity extends Activity {
         wireFocus();
 
         if (!dock.isEmpty()) { title.setText(dock.get(0).label); setGlow(dock.get(0).color); }
+        if (focusPkg != null) {
+            for (View c : dockCards) if (focusPkg.equals(((App) c.getTag()).pkg)) lastFocusedId = c.getId();
+            for (View c : gridCards) if (focusPkg.equals(((App) c.getTag()).pkg)) lastFocusedId = c.getId();
+            focusPkg = null;
+        }
         View last = lastFocusedId == View.NO_ID ? null : findViewById(lastFocusedId);
-        if (last != null) last.requestFocus();
-        else if (!dockCards.isEmpty()) dockCards.get(0).requestFocus();
+        if (last == null && !dockCards.isEmpty()) last = dockCards.get(0);
+        if (last != null) {
+            View target = last;
+            target.requestFocus();
+            // The removed tiles hand focus to the first focusable (Inputs) on the next layout; take it back.
+            scroll.post(target::requestFocus);
+        }
     }
 
     /** A 16:9 card with the app's banner; the name shows under it while focused. */
@@ -536,21 +560,13 @@ public class MainActivity extends Activity {
     // ---------------------------------------------------------------- inputs
 
     private void showInputs(View anchor) {
-        LinearLayout list = new LinearLayout(this);
-        list.setOrientation(LinearLayout.VERTICAL);
-        list.setPadding(dp(8), dp(8), dp(8), dp(8));
-        GradientDrawable bg = new GradientDrawable();
-        bg.setCornerRadius(dp(16));
-        bg.setColor(0xF02A2A2E);
-        bg.setStroke(dp(1), 0x26FFFFFF);
-        list.setBackground(bg);
-
-        PopupWindow pw = new PopupWindow(list, dp(200), -2, true);
         List<TextView> rows = new ArrayList<>();
 
         TvInputManager tim = (TvInputManager) getSystemService(TV_INPUT_SERVICE);
         List<TvInputInfo> inputs = new ArrayList<>();
-        if (tim != null) for (TvInputInfo t : tim.getTvInputList()) {
+        // Only list HDMI etc. when a real TV app handles passthrough URIs; on some sets nothing does and
+        // a file manager's catch-all content:// filter would grab the tap instead.
+        if (tim != null && canOpenPassthrough()) for (TvInputInfo t : tim.getTvInputList()) {
             if (t.isPassthroughInput() && !t.isHidden(this)) inputs.add(t);
         }
         Collections.sort(inputs, (x, y) -> inputLabel(x).compareToIgnoreCase(inputLabel(y)));
@@ -564,7 +580,51 @@ public class MainActivity extends Activity {
         if (isInstalled(liveTvPkg)) rows.add(inputRow("Live TV", () -> openPackage(liveTvPkg)));
         if (inputs.isEmpty() && isInstalled(inputPickerPkg)) rows.add(inputRow("All sources…", () -> openPackage(inputPickerPkg)));
 
-        if (rows.isEmpty()) rows.add(inputRow("Settings", () -> launch(new Intent(Settings.ACTION_SETTINGS))));
+        if (rows.isEmpty()) rows.add(inputRow("Settings", this::openSettings));
+        showMenu(anchor, rows, dp(200));
+    }
+
+    /** Long-press menu for a tile: pin to / remove from the dock, move within it, uninstall. */
+    private void showAppMenu(View card, App app, boolean inDock) {
+        List<String> dock = new ArrayList<>();
+        for (View c : dockCards) dock.add(((App) c.getTag()).pkg);
+        int at = dock.indexOf(app.pkg);
+        List<TextView> rows = new ArrayList<>();
+        if (!inDock) {
+            rows.add(inputRow("Asosiy qatorga qo'shish", () -> { dock.add(app.pkg); saveDock(dock, app.pkg); }));
+        } else {
+            if (at > 0) rows.add(inputRow("◀  Chapga surish", () -> {
+                Collections.swap(dock, at, at - 1); saveDock(dock, app.pkg);
+            }));
+            if (at < dock.size() - 1) rows.add(inputRow("O'ngga surish  ▶", () -> {
+                Collections.swap(dock, at, at + 1); saveDock(dock, app.pkg);
+            }));
+            rows.add(inputRow("Asosiy qatordan olish", () -> { dock.remove(app.pkg); saveDock(dock, app.pkg); }));
+        }
+        if (app.removable) rows.add(inputRow("Ilovani o'chirish", () -> launch(
+                new Intent(Intent.ACTION_DELETE, android.net.Uri.fromParts("package", app.pkg, null)))));
+        showMenu(card, rows, dp(240));
+    }
+
+    private void saveDock(List<String> dock, String focus) {
+        dockApps = dock.toArray(new String[0]);
+        getPreferences(MODE_PRIVATE).edit().putString("dock", android.text.TextUtils.join(",", dock)).apply();
+        focusPkg = focus;
+        buildApps();
+    }
+
+    /** A focusable dropdown of rows under the anchor; each row's tag is the Runnable it runs. */
+    private void showMenu(View anchor, List<TextView> rows, int width) {
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        list.setPadding(dp(8), dp(8), dp(8), dp(8));
+        GradientDrawable bg = new GradientDrawable();
+        bg.setCornerRadius(dp(16));
+        bg.setColor(0xF02A2A2E);
+        bg.setStroke(dp(1), 0x26FFFFFF);
+        list.setBackground(bg);
+
+        PopupWindow pw = new PopupWindow(list, width, -2, true);
         for (TextView r : rows) {
             r.setOnClickListener(v -> { pw.dismiss(); ((Runnable) v.getTag()).run(); });
             list.addView(r, new LinearLayout.LayoutParams(-1, dp(36)));
@@ -580,8 +640,27 @@ public class MainActivity extends Activity {
         pw.setElevation(dp(16));
         pw.setOnDismissListener(() -> { inputsPopup = null; anchor.requestFocus(); });
         inputsPopup = pw;
-        pw.showAsDropDown(anchor, 0, dp(8), Gravity.START);
+        // Open upwards when there's no room below (dock tiles sit at the bottom edge).
+        list.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.EXACTLY),
+                View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+        int[] at = new int[2];
+        anchor.getLocationOnScreen(at);
+        int below = getResources().getDisplayMetrics().heightPixels - (at[1] + anchor.getHeight());
+        int yoff = below >= list.getMeasuredHeight() + dp(16) ? dp(8)
+                : -(anchor.getHeight() + list.getMeasuredHeight() + dp(8));
+        pw.showAsDropDown(anchor, 0, yoff, Gravity.START);
         rows.get(0).requestFocus();
+    }
+
+    private boolean canOpenPassthrough() {
+        Intent probe = new Intent(Intent.ACTION_VIEW, TvContract.buildChannelUriForPassthroughInput("probe"));
+        for (ResolveInfo ri : getPackageManager().queryIntentActivities(probe, PackageManager.GET_RESOLVED_FILTER)) {
+            if (ri.filter == null) continue;
+            for (int i = 0; i < ri.filter.countDataAuthorities(); i++) {
+                if (TvContract.AUTHORITY.equals(ri.filter.getDataAuthority(i).getHost())) return true;
+            }
+        }
+        return false;
     }
 
     private String inputLabel(TvInputInfo t) {
@@ -775,10 +854,26 @@ public class MainActivity extends Activity {
         }
     }
 
+    /**
+     * The TV's own settings, as the stock launcher opens them: the top LEANBACK_SETTINGS entry. Some boxes
+     * also ship the phone Settings app, which wins a plain ACTION_SETTINGS.
+     */
+    private void openSettings() {
+        Intent q = new Intent(Intent.ACTION_MAIN).addCategory("android.intent.category.LEANBACK_SETTINGS");
+        ResolveInfo best = null;
+        for (ResolveInfo ri : getPackageManager().queryIntentActivities(q, 0)) {
+            if (best == null || ri.priority > best.priority) best = ri;
+        }
+        if (best != null && launch(new Intent(Intent.ACTION_MAIN)
+                .setComponent(new ComponentName(best.activityInfo.packageName, best.activityInfo.name)))) return;
+        launch(new Intent(Settings.ACTION_SETTINGS));
+    }
+
+    /** pkg is a package name, or "pkg/.Activity" when the app's launch intent is the wrong screen. */
     private boolean isInstalled(String pkg) {
         if (pkg == null || pkg.isEmpty()) return false;
         try {
-            getPackageManager().getPackageInfo(pkg, 0);
+            getPackageManager().getPackageInfo(pkg.split("/")[0], 0);
             return true;
         } catch (PackageManager.NameNotFoundException e) {
             return false;
@@ -786,6 +881,10 @@ public class MainActivity extends Activity {
     }
 
     private void openPackage(String pkg) {
+        if (pkg.contains("/")) {
+            launch(new Intent(Intent.ACTION_MAIN).setComponent(ComponentName.unflattenFromString(pkg)));
+            return;
+        }
         Intent i = getPackageManager().getLeanbackLaunchIntentForPackage(pkg);
         if (i == null) i = getPackageManager().getLaunchIntentForPackage(pkg);
         if (i != null) launch(i);
@@ -823,11 +922,31 @@ public class MainActivity extends Activity {
         return Color.rgb((int) (Color.red(c) * f), (int) (Color.green(c) * f), (int) (Color.blue(c) * f));
     }
 
+    private boolean swallowOkUp;
+
     @Override
     public boolean dispatchKeyEvent(KeyEvent e) {
-        // Menu key on the remote opens the Inputs dropdown.
-        if (e.getKeyCode() == KeyEvent.KEYCODE_MENU && e.getAction() == KeyEvent.ACTION_UP && !pills.isEmpty()) {
-            showInputs(pills.get(0));
+        int key = e.getKeyCode();
+        View focused = getCurrentFocus();
+        boolean onTile = focused != null && focused.getTag() instanceof App;
+        boolean ok = key == KeyEvent.KEYCODE_DPAD_CENTER || key == KeyEvent.KEYCODE_ENTER;
+        // Holding OK on a tile opens its menu (pin, move, uninstall) instead of launching it.
+        if (ok && onTile && e.getAction() == KeyEvent.ACTION_DOWN && e.getRepeatCount() > 0) {
+            if (e.getRepeatCount() == 1) {
+                swallowOkUp = true;
+                focused.setPressed(false);
+                showAppMenu(focused, (App) focused.getTag(), dockCards.contains(focused));
+            }
+            return true;
+        }
+        if (ok && swallowOkUp && e.getAction() == KeyEvent.ACTION_UP) {
+            swallowOkUp = false;
+            return true;
+        }
+        // Menu key: the tile's menu on a tile, otherwise the Inputs dropdown.
+        if (key == KeyEvent.KEYCODE_MENU && e.getAction() == KeyEvent.ACTION_UP) {
+            if (onTile) showAppMenu(focused, (App) focused.getTag(), dockCards.contains(focused));
+            else if (!pills.isEmpty()) showInputs(pills.get(0));
             return true;
         }
         return super.dispatchKeyEvent(e);

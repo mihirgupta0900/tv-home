@@ -1,0 +1,7 @@
+# Nexus M8S PRO W (Amlogic), Android 7.1.2, build NHG47L 20180827
+# Apply: PY=tools/venv/Scripts/python tools/disable.sh examples/m8s-pro-w/debloat.txt
+# Undo:  PY=tools/venv/Scripts/python STOCK_LAUNCHER=com.google.android.leanbacklauncher/.MainActivity tools/restore.sh <same file>
+# Everything is DISABLED for user 0, never uninstalled. Google services and system apps kept on request.
+
+cm.aptoidetv.pt                    # Aptoide TV store (Google Play is there)
+org.acestream.media                # Ace Stream engine, runs in the background
