@@ -23,7 +23,9 @@
 
     <!-- The TV's Live TV / tuner app, listed last in the Inputs menu. Empty to leave it out.
          Common ones: com.tcl.tv (TCL), com.mediatek.wwtv.tvcenter (Xiaomi, many MediaTek sets),
-         com.google.android.tv (Google Live Channels), com.sony.dtv.tvx (Sony). -->
+         com.google.android.tv (Google Live Channels), com.sony.dtv.tvx (Sony).
+         Use "package/.Activity" when the app's launch screen is something else, e.g. CVTE/Skyworth
+         sets: com.cvte.tv.androidsetting/.TvSettingActivity (its launcher entry is Settings). -->
     <string name="live_tv_package" translatable="false">com.tcl.tv</string>
 
     <!-- The manufacturer's own source picker, used if switching to an input directly fails. -->

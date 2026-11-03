@@ -47,11 +47,18 @@ def push_b64(dev, local, remote, chunk=48_000):
     for i in range(0, len(enc), chunk):
         dev.shell(f"echo -n '{enc[i:i + chunk]}' >> {tmp}")
     dev.shell(f"base64 -d {tmp} > {remote} && rm -f {tmp}")
-    remote_md5 = dev.shell(f"md5sum {remote}").split()[0]
-    local_md5 = hashlib.md5(data).hexdigest()
-    if remote_md5 != local_md5:
-        sys.exit(f"md5 mismatch: {remote_md5} != {local_md5}")
-    print(f"pushed {local} -> {remote} ({len(data)} bytes, md5 ok)")
+    out = dev.shell(f"md5sum {remote} 2>/dev/null").split()
+    if out:
+        remote_md5, local_md5 = out[0], hashlib.md5(data).hexdigest()
+        if remote_md5 != local_md5:
+            sys.exit(f"md5 mismatch: {remote_md5} != {local_md5}")
+        print(f"pushed {local} -> {remote} ({len(data)} bytes, md5 ok)")
+        return
+    # Older toolboxes (Android 7) have no md5sum; fall back to comparing sizes.
+    size = dev.shell(f"stat -c %s {remote}").strip()
+    if size != str(len(data)):
+        sys.exit(f"size mismatch: {size} != {len(data)}")
+    print(f"pushed {local} -> {remote} ({len(data)} bytes, size ok)")
 
 
 def main():
@@ -68,6 +75,12 @@ def main():
                 print(f"$ {line}\n{dev.shell(line, read_timeout_s=120).rstrip()}")
     elif a[0] == "--pull":
         dev.pull(a[1], a[2])
+    elif a[0] == "--push":
+        dev.push(a[1], a[2], read_timeout_s=120)
+        remote = dev.shell(f"stat -c %s {a[2]}").strip()
+        if remote != str(os.path.getsize(a[1])):
+            sys.exit(f"size mismatch: {remote} != {os.path.getsize(a[1])}")
+        print(f"pushed {a[1]} -> {a[2]} ({remote} bytes)")
     elif a[0] == "--push-b64":
         push_b64(dev, a[1], a[2])
     elif a[0] == "--shot":

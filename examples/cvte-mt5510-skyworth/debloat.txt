@@ -1,0 +1,30 @@
+# CVTE TP.MT5510S.PB803 "SMART_TV" (Skyworth/Zeasn firmware), Android 7.0, build 20191212_143108_0002, 800 MB RAM
+# ADB: Factory menu -> DEBUG -> ADB ENABLE = ON, then use the official adb (platform-tools).
+# Apply: for p in $(grep -vE '^\s*(#|$)' <this file> | awk '{print $1}'); do adb shell pm disable-user --user 0 $p; done
+# Undo: same loop with 'pm enable'. This set never showed the adb-shell key prompt; the official adb's did.
+# Everything is DISABLED for user 0, never uninstalled.
+
+# Zeasn ads, recommendation rows and telemetry
+com.zeasn.tv.assistant.cvte                          # "Что нового" / recommended rows, ad feed
+com.zeasn.services.general                           # Zeasn background service
+com.zeasn.deviceportal.asdprovider.cvte5510.skyworth # Zeasn ad/device portal provider
+cn.zeasn.cvte.skyworth.vstoresubclient               # Zeasn app store
+
+# Kinopoisk: 4 background processes incl. Yandex Metrica, ~117 MB
+ru.kinopoisk.zeasn.tv
+
+# Second pass, optional apps (owner kept official YouTube): comment out any you use
+com.estrongs.android.pop                 # ES File Explorer: 3 background processes, ads, grabbed HDMI intents (X-plore stays)
+cm.aptoidetv.pt                          # Aptoide TV store (Google Play works)
+com.cvte.tv.appstore                     # CVTE app store
+com.cvte.tv.systemupgrade                # firmware updater, no updates since 2019
+com.google.android.marvin.talkback       # screen reader
+com.google.android.feedback              # Google feedback
+com.android.printservice.recommendation  # print service
+com.google.android.katniss               # Google voice search (remote mic stops working)
+com.mediatek.wfd                         # Miracast screen mirroring
+com.mediatek.androidbox                  # Miracast receiver screen
+com.android.browser                      # 2016 AOSP browser
+dkc.video.hdbox                          # HDBox
+net.gtvbox.videoplayer                   # Vimu player
+uz.turontelecom.cinerama                 # Cinerama
