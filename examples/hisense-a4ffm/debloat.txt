@@ -28,3 +28,7 @@ com.google.android.syncadapters.contacts
 
 # batch 3: Google Assistant (voice assistant not used; the mic button does nothing)
 com.google.android.katniss
+
+# batch 4: Hisense's boot-time fallback Home. Same priority as our launcher, so Android kept asking
+# "which home app?" whenever the saved default was dropped. Without it ours outranks the Settings fallback.
+com.android.boot.fallbackhome
