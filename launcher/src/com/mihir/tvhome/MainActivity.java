@@ -103,6 +103,7 @@ public class MainActivity extends Activity {
     private int wallGen;           // bumped on stop so a decode that finishes late is dropped
     private boolean wallReleased;  // photos were freed on stop; reload the same one on resume
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private final java.util.concurrent.ExecutorService io = java.util.concurrent.Executors.newSingleThreadExecutor();
     private final Runnable rotateWallpaper = this::nextWallpaper;
     static final long WALLPAPER_INTERVAL_MS = 10 * 60 * 1000;
     private TextView greeting, clock, ampm, date, title, wifiPill, appsLabel;
@@ -162,7 +163,7 @@ public class MainActivity extends Activity {
         IntentFilter bf = new IntentFilter(BluetoothDevice.ACTION_ACL_DISCONNECTED);
         bf.addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED);
         registerReceiver(btLock, bf);
-        BtPolicy.lockDown(this);
+        BtPolicy.lockDownAsync(this);
         updateClock();
         updateWifi();
         View last = lastFocusedId == View.NO_ID ? null : findViewById(lastFocusedId);
@@ -193,7 +194,7 @@ public class MainActivity extends Activity {
     }
 
     private final BroadcastReceiver btLock = new BroadcastReceiver() {
-        @Override public void onReceive(Context c, Intent i) { BtPolicy.lockDown(c); }
+        @Override public void onReceive(Context c, Intent i) { BtPolicy.lockDownAsync(c); }
     };
 
     @Override
@@ -220,6 +221,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         handler.removeCallbacks(rebuildApps);
+        io.shutdown();
         unregisterReceiver(packages);
         super.onDestroy();
     }
@@ -770,20 +772,29 @@ public class MainActivity extends Activity {
         date.setText(new SimpleDateFormat("EEEE  d MMMM", Locale.getDefault()).format(now.getTime()).toUpperCase(Locale.getDefault()));
     }
 
+    /** Looks the network name up on a worker thread (both managers are cross-process calls). */
     private void updateWifi() {
+        final Context app = getApplicationContext();
+        io.execute(() -> {
+            final String name = networkName(app);
+            handler.post(() -> { if (!isDestroyed()) wifiPill.setText("◉  " + name); });
+        });
+    }
+
+    private static String networkName(Context app) {
         String name = "Wi-Fi";
         try {
-            WifiManager wm = (WifiManager) getApplicationContext().getSystemService(WIFI_SERVICE);
+            WifiManager wm = (WifiManager) app.getSystemService(WIFI_SERVICE);
             if (wm != null && wm.getConnectionInfo() != null) {
                 String s = wm.getConnectionInfo().getSSID();
                 if (s != null && !s.contains("unknown ssid")) name = s.replace("\"", "");
                 if (wm.getConnectionInfo().getNetworkId() == -1) name = "Offline";
             }
-            android.net.ConnectivityManager cm = (android.net.ConnectivityManager) getSystemService(CONNECTIVITY_SERVICE);
+            android.net.ConnectivityManager cm = (android.net.ConnectivityManager) app.getSystemService(CONNECTIVITY_SERVICE);
             android.net.NetworkInfo ni = cm == null ? null : cm.getActiveNetworkInfo();
             if (ni != null && ni.isConnected() && ni.getType() == android.net.ConnectivityManager.TYPE_ETHERNET) name = "Ethernet";
         } catch (SecurityException ignored) { }
-        wifiPill.setText("◉  " + name);
+        return name;
     }
 
     // ---------------------------------------------------------------- glow

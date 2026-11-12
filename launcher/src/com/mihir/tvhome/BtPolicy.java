@@ -43,6 +43,25 @@ final class BtPolicy {
         }
     }
 
+    private static final java.util.concurrent.ExecutorService IO =
+            java.util.concurrent.Executors.newSingleThreadExecutor();
+    private static final java.util.concurrent.atomic.AtomicBoolean queued =
+            new java.util.concurrent.atomic.AtomicBoolean();
+
+    /**
+     * lockDown() off the main thread. It reads and writes Settings.Global and queries the Bluetooth
+     * service, which are cross-process calls. Requests that arrive while one is already waiting
+     * are merged, since a single run covers them all.
+     */
+    static void lockDownAsync(Context ctx) {
+        final Context app = ctx.getApplicationContext();
+        if (!queued.compareAndSet(false, true)) return;
+        IO.execute(() -> {
+            queued.set(false);   // clear first so an event during this run queues another pass
+            lockDown(app);
+        });
+    }
+
     /** Put every paired audio device back to "never connect on its own". Returns how many changed. */
     static int lockDown(Context ctx) {
         BluetoothAdapter bt = BluetoothAdapter.getDefaultAdapter();

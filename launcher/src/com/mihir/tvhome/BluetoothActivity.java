@@ -15,6 +15,8 @@ import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.LinearLayout;
@@ -63,7 +65,7 @@ public class BluetoothActivity extends Activity {
                 if (state == BluetoothDevice.BOND_BONDED) {
                     nearby.remove(d.getAddress());
                     // Pairing was the user's choice, so connect it straight away; otherwise re-lock.
-                    if (d.getAddress().equals(pairingAddress) && BtPolicy.isAudio(d)) connect(d); else BtPolicy.lockDown(c);
+                    if (d.getAddress().equals(pairingAddress) && BtPolicy.isAudio(d)) connect(d); else BtPolicy.lockDownAsync(c);
                     pairingAddress = null;
                 } else if (state == BluetoothDevice.BOND_NONE && d.getAddress().equals(pairingAddress)) {
                     pairingAddress = null;
@@ -71,14 +73,23 @@ public class BluetoothActivity extends Activity {
                 }
             } else if (BluetoothA2dp.ACTION_CONNECTION_STATE_CHANGED.equals(a)) {
                 int s = i.getIntExtra(BluetoothProfile.EXTRA_STATE, -1);
-                if (s == BluetoothProfile.STATE_DISCONNECTED) BtPolicy.lockDown(c);
+                if (s == BluetoothProfile.STATE_DISCONNECTED) BtPolicy.lockDownAsync(c);
                 if (s == BluetoothProfile.STATE_CONNECTED && d != null) setStatus("Connected to " + name(d) + ".");
             } else if (BluetoothDevice.ACTION_ACL_DISCONNECTED.equals(a)) {
-                BtPolicy.lockDown(c);
+                BtPolicy.lockDownAsync(c);
             }
-            refresh();
+            // Discovery reports devices in rapid bursts; redraw the list once per burst.
+            if (BluetoothDevice.ACTION_FOUND.equals(a)) {
+                handler.removeCallbacks(refreshLater);
+                handler.postDelayed(refreshLater, 300);
+            } else {
+                handler.removeCallbacks(refreshLater);
+                refresh();
+            }
         }
     };
+    private final Handler handler = new Handler(Looper.getMainLooper());
+    private final Runnable refreshLater = this::refresh;
 
     @Override
     protected void onCreate(Bundle b) {
@@ -130,6 +141,7 @@ public class BluetoothActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
+        handler.removeCallbacks(refreshLater);
         unregisterReceiver(events);
         stopScan();
     }
