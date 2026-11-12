@@ -6,29 +6,28 @@
 <resources>
     <!-- Dock apps, left to right. Apps that aren't installed are skipped. -->
     <string-array name="dock_apps">
-        <item>com.apple.atve.androidtv.appletv</item>
-        <item>com.google.android.youtube.tv</item>
-        <item>in.startv.hotstar</item>
         <item>com.netflix.ninja</item>
+        <item>com.google.android.youtube.tv</item>
         <item>com.amazon.amazonvideo.livingroom</item>
+        <item>com.disney.disneyplus</item>
+        <item>com.plexapp.android</item>
+        <item>com.spotify.tv.android</item>
     </string-array>
 
     <!-- Never shown as tiles: system helpers, and the Live TV app (it's in the Inputs menu). -->
     <string-array name="hidden_apps">
-        <item>com.tcl.tv</item>
-        <item>com.tcl.suspension</item>
-        <item>com.tcl.t_solo</item>
-        <item>com.tcl.dashboard</item>
+        <item>com.hisense.tv.protector</item>
+        <item>com.mediatek.wwtv.tvcenter</item>
     </string-array>
 
     <!-- The TV's Live TV / tuner app, listed last in the Inputs menu. Empty to leave it out.
          Common ones: com.tcl.tv (TCL), com.mediatek.wwtv.tvcenter (Xiaomi, many MediaTek sets),
          com.google.android.tv (Google Live Channels), com.sony.dtv.tvx (Sony). -->
-    <string name="live_tv_package" translatable="false">com.tcl.tv</string>
+    <string name="live_tv_package" translatable="false">com.mediatek.wwtv.tvcenter</string>
 
     <!-- The manufacturer's own source picker, used if switching to an input directly fails. -->
     <string name="input_picker_package" translatable="false">com.tcl.suspension</string>
 
     <!-- Tiles per row in the grid. -->
-    <integer name="columns">5</integer>
+    <integer name="columns">6</integer>
 </resources>

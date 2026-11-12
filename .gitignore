@@ -10,3 +10,6 @@ shots/
 launcher/build/
 .DS_Store
 __pycache__/
+
+# Local JDK and Android SDK (downloaded for the launcher build)
+tools/sdk/

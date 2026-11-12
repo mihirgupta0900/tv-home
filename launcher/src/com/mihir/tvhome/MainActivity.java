@@ -1,8 +1,7 @@
 package com.mihir.tvhome;
 
-import android.animation.ArgbEvaluator;
-import android.animation.ValueAnimator;
 import android.app.Activity;
+import android.bluetooth.BluetoothDevice;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
@@ -41,6 +40,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.PopupWindow;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -80,22 +80,34 @@ public class MainActivity extends Activity {
     private final List<View> gridCards = new ArrayList<>();
     private final List<View> pills = new ArrayList<>();
 
+    // Installed apps by package, and their display order: the first dockCount are the dock, the rest the grid.
+    private final Map<String, App> apps = new HashMap<>();
+    private final List<String> order = new ArrayList<>();
+    private int dockCount;
+    private String movingPkg;   // set while an app is picked up for rearranging
+    private String focusPkg;    // last focused app, so focus survives a rebuild
+    private android.content.SharedPreferences prefs;
+
     private HomeScrollView scroll;
     private LinearLayout content, dockRow;
     private FrameLayout hero;
     private LinearLayout grid;
-    private View glow;
+    private FrameLayout glow;          // container; its alpha is the fade
+    private View glowBase, glowTop;    // glowTop crossfades to a new colour over glowBase
+    private int glowTopColor;
     private ImageView wallBack, wallFront;
     private View gridShade;
     private String[] wallpapers = new String[0];
     private int wallIndex = -1;
     private long wallChangedAt;
+    private int wallGen;           // bumped on stop so a decode that finishes late is dropped
+    private boolean wallReleased;  // photos were freed on stop; reload the same one on resume
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private final java.util.concurrent.ExecutorService io = java.util.concurrent.Executors.newSingleThreadExecutor();
     private final Runnable rotateWallpaper = this::nextWallpaper;
     static final long WALLPAPER_INTERVAL_MS = 10 * 60 * 1000;
     private TextView greeting, clock, ampm, date, title, wifiPill, appsLabel;
     private int glowColor = 0xFF3A3A3A;
-    private ValueAnimator glowAnim;
     private int lastFocusedId = View.NO_ID;
     private boolean firstShow = true;
     private int packageSeq;
@@ -105,8 +117,13 @@ public class MainActivity extends Activity {
         @Override public void onReceive(Context c, Intent i) { updateClock(); updateWifi(); }
     };
     private final BroadcastReceiver packages = new BroadcastReceiver() {
-        @Override public void onReceive(Context c, Intent i) { buildApps(); }
+        // Installs and updates arrive in bursts; wait for the burst to end, then rebuild once.
+        @Override public void onReceive(Context c, Intent i) {
+            handler.removeCallbacks(rebuildApps);
+            handler.postDelayed(rebuildApps, 600);
+        }
     };
+    private final Runnable rebuildApps = this::buildApps;
 
     // ---------------------------------------------------------------- lifecycle
 
@@ -122,6 +139,7 @@ public class MainActivity extends Activity {
         getWindow().getDecorView().setSystemUiVisibility(
                 View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
                         | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY | View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+        prefs = getSharedPreferences("tvhome", MODE_PRIVATE);
         setContentView(buildUi());
         buildApps();
 
@@ -141,16 +159,28 @@ public class MainActivity extends Activity {
         tf.addAction(Intent.ACTION_TIMEZONE_CHANGED);
         tf.addAction(WifiManager.NETWORK_STATE_CHANGED_ACTION);
         registerReceiver(tick, tf);
+        // Re-lock paired audio devices whenever one disconnects or a new one pairs.
+        IntentFilter bf = new IntentFilter(BluetoothDevice.ACTION_ACL_DISCONNECTED);
+        bf.addAction(BluetoothDevice.ACTION_BOND_STATE_CHANGED);
+        registerReceiver(btLock, bf);
+        BtPolicy.lockDownAsync(this);
         updateClock();
         updateWifi();
         View last = lastFocusedId == View.NO_ID ? null : findViewById(lastFocusedId);
         if (last == null && !dockCards.isEmpty()) last = dockCards.get(0);
         if (last != null) last.requestFocus();
         // Catch installs/removals that happened while another app was in front.
-        if (getPackageManager().getChangedPackages(packageSeq) != null) buildApps();
+        if (getPackageManager().getChangedPackages(packageSeq) != null) {
+            handler.removeCallbacks(rebuildApps);
+            buildApps();
+        }
         if (firstShow) { firstShow = false; playEntrance(); }
         // New photo on return if the current one has been up for the full interval.
-        if (wallIndex < 0 || SystemClock.elapsedRealtime() - wallChangedAt >= WALLPAPER_INTERVAL_MS) nextWallpaper();
+        if (wallReleased && wallIndex >= 0 && SystemClock.elapsedRealtime() - wallChangedAt < WALLPAPER_INTERVAL_MS) {
+            wallReleased = false;
+            loadWallpaper(wallIndex);
+            scheduleWallpaper(WALLPAPER_INTERVAL_MS - (SystemClock.elapsedRealtime() - wallChangedAt));
+        } else if (wallIndex < 0 || SystemClock.elapsedRealtime() - wallChangedAt >= WALLPAPER_INTERVAL_MS) { wallReleased = false; nextWallpaper(); }
         else scheduleWallpaper(WALLPAPER_INTERVAL_MS - (SystemClock.elapsedRealtime() - wallChangedAt));
     }
 
@@ -159,11 +189,39 @@ public class MainActivity extends Activity {
         super.onPause();
         handler.removeCallbacks(rotateWallpaper);
         unregisterReceiver(tick);
+        unregisterReceiver(btLock);
         if (inputsPopup != null) inputsPopup.dismiss();
+    }
+
+    private final BroadcastReceiver btLock = new BroadcastReceiver() {
+        @Override public void onReceive(Context c, Intent i) { BtPolicy.lockDownAsync(c); }
+    };
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        releaseWallpapers();
+    }
+
+    @Override
+    public void onTrimMemory(int level) {
+        super.onTrimMemory(level);
+        if (level >= TRIM_MEMORY_UI_HIDDEN) releaseWallpapers();
+    }
+
+    /** Free both full-screen photos while another app is in front; onResume reloads the current one. */
+    private void releaseWallpapers() {
+        wallGen++;
+        handler.removeCallbacks(rotateWallpaper);
+        if (wallFront != null) { wallFront.animate().cancel(); wallFront.setImageDrawable(null); }
+        if (wallBack != null) { wallBack.animate().cancel(); wallBack.setImageDrawable(null); }
+        wallReleased = true;
     }
 
     @Override
     protected void onDestroy() {
+        handler.removeCallbacks(rebuildApps);
+        io.shutdown();
         unregisterReceiver(packages);
         super.onDestroy();
     }
@@ -173,12 +231,14 @@ public class MainActivity extends Activity {
         super.onNewIntent(intent);
         // Home pressed while already home: jump back to the first dock app.
         if (inputsPopup != null) inputsPopup.dismiss();
+        if (movingPkg != null) stopMove();
         if (!dockCards.isEmpty()) dockCards.get(0).requestFocus();
         scroll.smoothScrollTo(0, 0);
     }
 
     @Override
     public void onBackPressed() {
+        if (movingPkg != null) { stopMove(); return; }
         // Home has nowhere to go back to; Back from the grid returns to the dock.
         if (scroll.getScrollY() > 0 && !dockCards.isEmpty()) dockCards.get(0).requestFocus();
     }
@@ -207,7 +267,12 @@ public class MainActivity extends Activity {
             wallpapers = getAssets().list("wallpapers");
         } catch (java.io.IOException ignored) { }
 
-        glow = new View(this);
+        glow = new FrameLayout(this);
+        glowBase = new View(this);
+        glowTop = new View(this);
+        glowTop.setAlpha(0f);
+        glow.addView(glowBase, new FrameLayout.LayoutParams(-1, -1));
+        glow.addView(glowTop, new FrameLayout.LayoutParams(-1, -1));
         root.addView(glow, new FrameLayout.LayoutParams(-1, -1));
         setGlow(glowColor);
 
@@ -303,11 +368,13 @@ public class MainActivity extends Activity {
         right.setClipChildren(false);
         TextView inputs = pill("Inputs", "⇥");
         inputs.setOnClickListener(v -> showInputs(v));
+        TextView bluetooth = pill("Bluetooth", "ᛒ");
+        bluetooth.setOnClickListener(v -> startActivity(new Intent(this, BluetoothActivity.class)));
         wifiPill = pill("Wi-Fi", "◉");
         wifiPill.setOnClickListener(v -> launch(new Intent(Settings.ACTION_WIFI_SETTINGS)));
         TextView settings = pill("Settings", "⚙");
         settings.setOnClickListener(v -> launch(new Intent(Settings.ACTION_SETTINGS)));
-        for (TextView p : new TextView[]{inputs, wifiPill, settings}) {
+        for (TextView p : new TextView[]{inputs, bluetooth, wifiPill, settings}) {
             right.addView(p, llp(-2, dp(30), dp(10), 0, 0, 0));
             pills.add(p);
         }
@@ -360,10 +427,29 @@ public class MainActivity extends Activity {
             byPkg.put(a.pkg, a);
         }
 
+        apps.clear();
+        apps.putAll(byPkg);
+        layoutApps();
+    }
+
+    /** Orders the apps (saved order, else the config dock then A-Z) and rebuilds the dock and grid tiles. */
+    private void layoutApps() {
+        Set<String> seen = new HashSet<>();
+        order.clear();
+        String saved = prefs.getString("order", "");
+        if (!saved.isEmpty()) for (String p : saved.split(",")) if (apps.containsKey(p) && seen.add(p)) order.add(p);
+        boolean custom = !order.isEmpty();
+        if (!custom) for (String p : dockApps) if (apps.containsKey(p) && seen.add(p)) order.add(p);
+        int defaultDock = order.size();
+        List<App> fresh = new ArrayList<>();   // installed since the order was saved
+        for (App a : apps.values()) if (!seen.contains(a.pkg)) fresh.add(a);
+        Collections.sort(fresh, (x, y) -> x.label.compareToIgnoreCase(y.label));
+        for (App a : fresh) order.add(a.pkg);
+        dockCount = custom ? Math.min(dockApps.length, order.size()) : defaultDock;
+
         List<App> dock = new ArrayList<>();
-        for (String p : dockApps) if (byPkg.containsKey(p)) dock.add(byPkg.remove(p));
-        List<App> rest = new ArrayList<>(byPkg.values());
-        Collections.sort(rest, (x, y) -> x.label.compareToIgnoreCase(y.label));
+        List<App> rest = new ArrayList<>();
+        for (int i = 0; i < order.size(); i++) (i < dockCount ? dock : rest).add(apps.get(order.get(i)));
 
         dockRow.removeAllViews();
         grid.removeAllViews();
@@ -400,9 +486,66 @@ public class MainActivity extends Activity {
         wireFocus();
 
         if (!dock.isEmpty()) { title.setText(dock.get(0).label); setGlow(dock.get(0).color); }
-        View last = lastFocusedId == View.NO_ID ? null : findViewById(lastFocusedId);
+        View last = cardFor(movingPkg != null ? movingPkg : focusPkg);
+        if (last == null && lastFocusedId != View.NO_ID) last = findViewById(lastFocusedId);
         if (last != null) last.requestFocus();
         else if (!dockCards.isEmpty()) dockCards.get(0).requestFocus();
+    }
+
+    private View cardFor(String pkg) {
+        if (pkg == null) return null;
+        for (List<View> cards : Arrays.asList(dockCards, gridCards))
+            for (View c : cards) if (pkg.equals(((App) c.getTag()).pkg)) return c;
+        return null;
+    }
+
+    // ---------------------------------------------------------------- rearranging
+
+    /** Long-press OK on a tile picks it up; arrows move it, OK drops it, Menu resets the order. */
+    private void startMove(String pkg) {
+        movingPkg = pkg;
+        layoutApps();
+        Toast.makeText(this, "Arrows to move  ·  OK to drop  ·  Menu to reset", Toast.LENGTH_LONG).show();
+    }
+
+    private void stopMove() {
+        movingPkg = null;
+        layoutApps();
+    }
+
+    private void moveApp(int keyCode) {
+        int i = order.indexOf(movingPkg);
+        int t = moveTarget(i, keyCode);
+        if (i < 0 || t < 0 || t >= order.size() || t == i) return;
+        Collections.swap(order, i, t);
+        StringBuilder sb = new StringBuilder();
+        for (String p : order) sb.append(sb.length() == 0 ? "" : ",").append(p);
+        prefs.edit().putString("order", sb.toString()).apply();
+        layoutApps();
+    }
+
+    /**
+     * Where the picked-up app at position i in `order` swaps to when a D-pad key is pressed, or -1 for
+     * no move. Positions 0..dockCount-1 are the dock (one row of tiles), the rest is the grid in rows
+     * of `cols`, so grid position g = i - dockCount sits at row g / cols, column g % cols.
+     */
+    private int moveTarget(int i, int keyCode) {
+        int g = i - dockCount;                    // position in the grid, negative while in the dock
+        int gridSize = order.size() - dockCount;
+        switch (keyCode) {
+            case KeyEvent.KEYCODE_DPAD_LEFT:      // don't wrap to the end of the row above
+                return g > 0 && g % cols == 0 ? -1 : i - 1;
+            case KeyEvent.KEYCODE_DPAD_RIGHT:     // don't wrap to the start of the row below
+                return g >= 0 && g % cols == cols - 1 ? -1 : i + 1;
+            case KeyEvent.KEYCODE_DPAD_DOWN:
+                if (g < 0) return gridSize > 0 ? Math.min(dockCount + i, order.size() - 1) : -1;
+                return g + cols < gridSize ? i + cols : -1;
+            case KeyEvent.KEYCODE_DPAD_UP:
+                if (g < 0) return -1;
+                return g < cols ? Math.min(g, dockCount - 1) : i - cols;
+            default:
+                return -1;
+        }
     }
 
     /** A 16:9 card with the app's banner; the name shows under it while focused. */
@@ -462,7 +605,15 @@ public class MainActivity extends Activity {
                 .addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER)
                 .setComponent(app.component)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)));
+        card.setOnLongClickListener(v -> { startMove(app.pkg); return true; });
+        if (app.pkg.equals(movingPkg)) {
+            GradientDrawable lift = new GradientDrawable();
+            lift.setCornerRadius(dp(10));
+            lift.setStroke(dp(3), 0xFFFFD60A);
+            card.setForeground(lift);
+        }
         card.setOnFocusChangeListener((v, has) -> {
+            if (has) focusPkg = app.pkg;
             float s = has ? (inDock ? 1.12f : 1.1f) : 1f;
             v.animate().scaleX(s).scaleY(s).translationZ(has ? dp(14) : 0)
                     .setInterpolator(has ? new OvershootInterpolator(1.8f) : new DecelerateInterpolator())
@@ -621,37 +772,67 @@ public class MainActivity extends Activity {
         date.setText(new SimpleDateFormat("EEEE  d MMMM", Locale.getDefault()).format(now.getTime()).toUpperCase(Locale.getDefault()));
     }
 
+    /** Looks the network name up on a worker thread (both managers are cross-process calls). */
     private void updateWifi() {
+        final Context app = getApplicationContext();
+        io.execute(() -> {
+            final String name = networkName(app);
+            handler.post(() -> { if (!isDestroyed()) wifiPill.setText("◉  " + name); });
+        });
+    }
+
+    private static String networkName(Context app) {
         String name = "Wi-Fi";
         try {
-            WifiManager wm = (WifiManager) getApplicationContext().getSystemService(WIFI_SERVICE);
+            WifiManager wm = (WifiManager) app.getSystemService(WIFI_SERVICE);
             if (wm != null && wm.getConnectionInfo() != null) {
                 String s = wm.getConnectionInfo().getSSID();
                 if (s != null && !s.contains("unknown ssid")) name = s.replace("\"", "");
                 if (wm.getConnectionInfo().getNetworkId() == -1) name = "Offline";
             }
+            android.net.ConnectivityManager cm = (android.net.ConnectivityManager) app.getSystemService(CONNECTIVITY_SERVICE);
+            android.net.NetworkInfo ni = cm == null ? null : cm.getActiveNetworkInfo();
+            if (ni != null && ni.isConnected() && ni.getType() == android.net.ConnectivityManager.TYPE_ETHERNET) name = "Ethernet";
         } catch (SecurityException ignored) { }
-        wifiPill.setText("◉  " + name);
+        return name;
     }
 
     // ---------------------------------------------------------------- glow
 
-    private void setGlow(int color) {
-        glowColor = color;
+    private GradientDrawable glowDrawable(int color) {
         GradientDrawable g = new GradientDrawable();
         g.setGradientType(GradientDrawable.RADIAL_GRADIENT);
         g.setGradientCenter(0.5f, 0.78f);
         g.setGradientRadius(getResources().getDisplayMetrics().widthPixels * 0.62f);
         g.setColors(new int[]{withAlpha(color, 0.5f), withAlpha(color, 0.14f), Color.TRANSPARENT});
-        glow.setBackground(g);
+        return g;
     }
 
+    /** Jump straight to a colour (no animation). */
+    private void setGlow(int color) {
+        glowTop.animate().cancel();
+        glowTop.setAlpha(0f);
+        glowColor = color;
+        glowBase.setBackground(glowDrawable(color));
+    }
+
+    /**
+     * Crossfade to a new colour by fading one pre-built layer over another. The gradient is built
+     * once per change instead of once per frame, so the GPU does the animating.
+     */
     private void animateGlow(int to) {
-        if (glowAnim != null) glowAnim.cancel();
-        glowAnim = ValueAnimator.ofObject(new ArgbEvaluator(), glowColor, to);
-        glowAnim.setDuration(450);
-        glowAnim.addUpdateListener(a -> setGlow((int) a.getAnimatedValue()));
-        glowAnim.start();
+        if (to == glowColor) return;
+        glowTop.animate().cancel();
+        // An interrupted fade: lock in the colour it was heading to before starting the next.
+        if (glowTop.getAlpha() > 0f) glowBase.setBackground(glowDrawable(glowTopColor));
+        glowTopColor = to;
+        glowColor = to;
+        glowTop.setBackground(glowDrawable(to));
+        glowTop.setAlpha(0f);
+        glowTop.animate().alpha(1f).setDuration(450).withEndAction(() -> {
+            glowBase.setBackground(glowDrawable(glowTopColor));
+            glowTop.setAlpha(0f);
+        }).start();
     }
 
     private void fadeGlow(float alpha) {
@@ -676,7 +857,13 @@ public class MainActivity extends Activity {
         wallIndex = (wallIndex + 1) % wallpapers.length;
         getPreferences(MODE_PRIVATE).edit().putInt("wallpaper", wallIndex).apply();
         wallChangedAt = SystemClock.elapsedRealtime();
-        String name = "wallpapers/" + wallpapers[wallIndex];
+        loadWallpaper(wallIndex);
+        scheduleWallpaper(WALLPAPER_INTERVAL_MS);
+    }
+
+    private void loadWallpaper(int index) {
+        final String name = "wallpapers/" + wallpapers[index];
+        final int gen = wallGen;
         new Thread(() -> {
             Bitmap bm = null;
             try (java.io.InputStream in = getAssets().open(name)) {
@@ -685,9 +872,8 @@ public class MainActivity extends Activity {
                 bm = BitmapFactory.decodeStream(in, null, o);
             } catch (java.io.IOException ignored) { }
             Bitmap result = bm;
-            runOnUiThread(() -> showWallpaper(result));
+            runOnUiThread(() -> { if (gen == wallGen) showWallpaper(result); });
         }).start();
-        scheduleWallpaper(WALLPAPER_INTERVAL_MS);
     }
 
     private void showWallpaper(Bitmap bm) {
@@ -825,6 +1011,23 @@ public class MainActivity extends Activity {
 
     @Override
     public boolean dispatchKeyEvent(KeyEvent e) {
+        if (movingPkg != null) {
+            int k = e.getKeyCode();
+            boolean arrow = k == KeyEvent.KEYCODE_DPAD_UP || k == KeyEvent.KEYCODE_DPAD_DOWN
+                    || k == KeyEvent.KEYCODE_DPAD_LEFT || k == KeyEvent.KEYCODE_DPAD_RIGHT;
+            boolean ok = k == KeyEvent.KEYCODE_DPAD_CENTER || k == KeyEvent.KEYCODE_ENTER;
+            if (arrow || ok || k == KeyEvent.KEYCODE_MENU) {
+                // Ignore repeats and key-ups so the press that picked the app up doesn't also drop it.
+                if (e.getAction() == KeyEvent.ACTION_DOWN) {
+                    if (arrow) moveApp(k);
+                    else if (e.getRepeatCount() == 0) {
+                        if (ok) stopMove();
+                        else { prefs.edit().remove("order").apply(); stopMove(); }
+                    }
+                }
+                return true;
+            }
+        }
         // Menu key on the remote opens the Inputs dropdown.
         if (e.getKeyCode() == KeyEvent.KEYCODE_MENU && e.getAction() == KeyEvent.ACTION_UP && !pills.isEmpty()) {
             showInputs(pills.get(0));

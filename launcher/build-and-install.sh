@@ -11,12 +11,14 @@ BT="$SDK/build-tools/34.0.0"
 JAR="$SDK/platforms/android-34/android.jar"
 # Google TV stock launcher; older Android TV sets use com.google.android.tvlauncher.
 STOCK_LAUNCHER="${STOCK_LAUNCHER:-com.google.android.apps.tv.launcherx}"
+# Lowest Android API the TV runs (Android 9 = 28). Google TV on Android 11+ can keep 30.
+MIN_SDK="${MIN_SDK:-30}"
 B=build
 
 rm -rf "$B" && mkdir -p "$B/gen" "$B/classes" "$B/dex"
 "$BT/aapt2" compile --dir res -o "$B/res.zip"
 "$BT/aapt2" link -o "$B/base.apk" -I "$JAR" --manifest AndroidManifest.xml --java "$B/gen" \
-  -A assets --min-sdk-version 30 --target-sdk-version 30 "$B/res.zip"
+  -A assets --min-sdk-version "$MIN_SDK" --target-sdk-version 30 "$B/res.zip"
 javac -nowarn -Xlint:-options --release 11 -classpath "$JAR" -d "$B/classes" \
   $(find src "$B/gen" -name '*.java')
 "$BT/d8" --min-api 30 --lib "$JAR" --output "$B/dex" $(find "$B/classes" -name '*.class')
@@ -29,15 +31,18 @@ cp "$B/base.apk" "$B/unsigned.apk"
 echo "built $B/tvhome.apk ($(wc -c < "$B/tvhome.apk") bytes)"
 [ "${1:-}" = "--build" ] && exit 0
 
-PY=../tools/venv/bin/python
+# Disabling setupwraith can delete the Wi-Fi network saved at first setup; opt in with DISABLE_SETUPWRAITH=1.
+[ "${DISABLE_SETUPWRAITH:-0}" = 1 ] && SETUPWRAITH_CMD="pm disable-user --user 0 com.google.android.tungsten.setupwraith"
+PY="${PY:-../tools/venv/bin/python}"
 "$PY" -I ../tools/tv.py --push-b64 "$B/tvhome.apk" /data/local/tmp/tvhome.apk
 printf '%s\n' \
   "pm install -r /data/local/tmp/tvhome.apk" \
   "rm -f /data/local/tmp/tvhome.apk" \
   "pm grant com.mihir.tvhome android.permission.ACCESS_FINE_LOCATION" \
+  "pm grant com.mihir.tvhome android.permission.WRITE_SECURE_SETTINGS" \
   "cmd package set-home-activity --user 0 com.mihir.tvhome/.MainActivity" \
   "pm disable-user --user 0 $STOCK_LAUNCHER" \
-  "pm disable-user --user 0 com.google.android.tungsten.setupwraith" \
+  "${SETUPWRAITH_CMD:-true}" \
   "cmd package set-home-activity --user 0 com.mihir.tvhome/.MainActivity" \
   "am force-stop com.android.tv.settings" \
   "input keyevent KEYCODE_HOME" \
