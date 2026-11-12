@@ -1,7 +1,5 @@
 package com.mihir.tvhome;
 
-import android.animation.ArgbEvaluator;
-import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.bluetooth.BluetoothDevice;
 import android.content.BroadcastReceiver;
@@ -94,7 +92,9 @@ public class MainActivity extends Activity {
     private LinearLayout content, dockRow;
     private FrameLayout hero;
     private LinearLayout grid;
-    private View glow;
+    private FrameLayout glow;          // container; its alpha is the fade
+    private View glowBase, glowTop;    // glowTop crossfades to a new colour over glowBase
+    private int glowTopColor;
     private ImageView wallBack, wallFront;
     private View gridShade;
     private String[] wallpapers = new String[0];
@@ -107,7 +107,6 @@ public class MainActivity extends Activity {
     static final long WALLPAPER_INTERVAL_MS = 10 * 60 * 1000;
     private TextView greeting, clock, ampm, date, title, wifiPill, appsLabel;
     private int glowColor = 0xFF3A3A3A;
-    private ValueAnimator glowAnim;
     private int lastFocusedId = View.NO_ID;
     private boolean firstShow = true;
     private int packageSeq;
@@ -117,8 +116,13 @@ public class MainActivity extends Activity {
         @Override public void onReceive(Context c, Intent i) { updateClock(); updateWifi(); }
     };
     private final BroadcastReceiver packages = new BroadcastReceiver() {
-        @Override public void onReceive(Context c, Intent i) { buildApps(); }
+        // Installs and updates arrive in bursts; wait for the burst to end, then rebuild once.
+        @Override public void onReceive(Context c, Intent i) {
+            handler.removeCallbacks(rebuildApps);
+            handler.postDelayed(rebuildApps, 600);
+        }
     };
+    private final Runnable rebuildApps = this::buildApps;
 
     // ---------------------------------------------------------------- lifecycle
 
@@ -165,7 +169,10 @@ public class MainActivity extends Activity {
         if (last == null && !dockCards.isEmpty()) last = dockCards.get(0);
         if (last != null) last.requestFocus();
         // Catch installs/removals that happened while another app was in front.
-        if (getPackageManager().getChangedPackages(packageSeq) != null) buildApps();
+        if (getPackageManager().getChangedPackages(packageSeq) != null) {
+            handler.removeCallbacks(rebuildApps);
+            buildApps();
+        }
         if (firstShow) { firstShow = false; playEntrance(); }
         // New photo on return if the current one has been up for the full interval.
         if (wallReleased && wallIndex >= 0 && SystemClock.elapsedRealtime() - wallChangedAt < WALLPAPER_INTERVAL_MS) {
@@ -212,6 +219,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        handler.removeCallbacks(rebuildApps);
         unregisterReceiver(packages);
         super.onDestroy();
     }
@@ -257,7 +265,12 @@ public class MainActivity extends Activity {
             wallpapers = getAssets().list("wallpapers");
         } catch (java.io.IOException ignored) { }
 
-        glow = new View(this);
+        glow = new FrameLayout(this);
+        glowBase = new View(this);
+        glowTop = new View(this);
+        glowTop.setAlpha(0f);
+        glow.addView(glowBase, new FrameLayout.LayoutParams(-1, -1));
+        glow.addView(glowTop, new FrameLayout.LayoutParams(-1, -1));
         root.addView(glow, new FrameLayout.LayoutParams(-1, -1));
         setGlow(glowColor);
 
@@ -775,22 +788,40 @@ public class MainActivity extends Activity {
 
     // ---------------------------------------------------------------- glow
 
-    private void setGlow(int color) {
-        glowColor = color;
+    private GradientDrawable glowDrawable(int color) {
         GradientDrawable g = new GradientDrawable();
         g.setGradientType(GradientDrawable.RADIAL_GRADIENT);
         g.setGradientCenter(0.5f, 0.78f);
         g.setGradientRadius(getResources().getDisplayMetrics().widthPixels * 0.62f);
         g.setColors(new int[]{withAlpha(color, 0.5f), withAlpha(color, 0.14f), Color.TRANSPARENT});
-        glow.setBackground(g);
+        return g;
     }
 
+    /** Jump straight to a colour (no animation). */
+    private void setGlow(int color) {
+        glowTop.animate().cancel();
+        glowTop.setAlpha(0f);
+        glowColor = color;
+        glowBase.setBackground(glowDrawable(color));
+    }
+
+    /**
+     * Crossfade to a new colour by fading one pre-built layer over another. The gradient is built
+     * once per change instead of once per frame, so the GPU does the animating.
+     */
     private void animateGlow(int to) {
-        if (glowAnim != null) glowAnim.cancel();
-        glowAnim = ValueAnimator.ofObject(new ArgbEvaluator(), glowColor, to);
-        glowAnim.setDuration(450);
-        glowAnim.addUpdateListener(a -> setGlow((int) a.getAnimatedValue()));
-        glowAnim.start();
+        if (to == glowColor) return;
+        glowTop.animate().cancel();
+        // An interrupted fade: lock in the colour it was heading to before starting the next.
+        if (glowTop.getAlpha() > 0f) glowBase.setBackground(glowDrawable(glowTopColor));
+        glowTopColor = to;
+        glowColor = to;
+        glowTop.setBackground(glowDrawable(to));
+        glowTop.setAlpha(0f);
+        glowTop.animate().alpha(1f).setDuration(450).withEndAction(() -> {
+            glowBase.setBackground(glowDrawable(glowTopColor));
+            glowTop.setAlpha(0f);
+        }).start();
     }
 
     private void fadeGlow(float alpha) {
